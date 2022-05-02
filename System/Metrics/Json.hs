@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Encoding of ekg metrics as JSON. The encoding defined by the
@@ -16,11 +17,18 @@ module System.Metrics.Json
 
 import Data.Aeson ((.=))
 import qualified Data.Aeson.Types as A
+import qualified Data.HashMap.Strict as HM
+#if MIN_VERSION_aeson(2,0,0)
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as M
+#else
 import qualified Data.HashMap.Strict as M
+#endif
 import Data.Int (Int64)
 import qualified Data.Text as T
 import qualified System.Metrics as Metrics
 import qualified System.Metrics.Distribution as Distribution
+import Data.Foldable.WithIndex (ifoldl')
 
 ------------------------------------------------------------------------
 -- * Converting metrics to JSON values
@@ -47,13 +55,22 @@ sampleToJson :: Metrics.Sample -> A.Value
 sampleToJson metrics =
     buildOne metrics $ A.emptyObject
   where
-    buildOne :: M.HashMap T.Text Metrics.Value -> A.Value -> A.Value
+    buildOne :: HM.HashMap T.Text Metrics.Value -> A.Value -> A.Value
+#if MIN_VERSION_aeson(2,0,0)
+    buildOne m o = ifoldl' build o (M.fromHashMapText m)
+#else
     buildOne m o = M.foldlWithKey' build o m
+#endif
 
+#if MIN_VERSION_aeson(2,0,0)
+    build :: A.Key -> A.Value -> Metrics.Value -> A.Value
+    build name m val = go m (Key.fromText <$> T.splitOn "." (Key.toText name)) val
+#else
     build :: A.Value -> T.Text -> Metrics.Value -> A.Value
     build m name val = go m (T.splitOn "." name) val
+#endif
 
-    go :: A.Value -> [T.Text] -> Metrics.Value -> A.Value
+    -- go :: A.Value -> [T.Text] -> Metrics.Value -> A.Value
     go (A.Object m) [str] val      = A.Object $ M.insert str metric m
       where metric = valueToJson val
     go (A.Object m) (str:rest) val = case M.lookup str m of
